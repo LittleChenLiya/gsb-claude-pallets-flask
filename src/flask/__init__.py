@@ -1,6 +1,8 @@
 from . import json as json
 from .app import Flask as Flask
 from .blueprints import Blueprint as Blueprint
+from .body_replay import BodyReplayMiddleware as BodyReplayMiddleware
+from .body_replay import BodyReplayStream as BodyReplayStream
 from .config import Config as Config
 from .ctx import after_this_request as after_this_request
 from .ctx import copy_current_request_context as copy_current_request_context

@@ -35,6 +35,7 @@ collected in the following pages.
    deferredcallbacks
    methodoverrides
    requestchecksum
+   bodyreplay
    celery
    subclassing
    singlepageapplications

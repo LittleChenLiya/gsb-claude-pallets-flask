@@ -26,6 +26,10 @@ Unreleased
     such as HTMX. :issue:`5895`
 -   ``provide_automatic_options=True`` can be used to enable it for a view when
     it's disabled in config. Previously, only disabling worked. :issue:`5916`
+-   Add ``BodyReplayMiddleware`` and ``BodyReplayStream``, a composable WSGI
+    middleware that spools each request body to memory or a temporary file,
+    enforces per-route maximum body sizes with a deterministic 413 error
+    during the read, and releases resources when the client disconnects.
 -   ``Flask.select_jinja_autoescape`` uses case-insensitive comparison instead
     of only lower case file extensions. :pr:`6012`
 -   Fix parsing IPv6 with port in ``run`` and the test client. :pr:`6096`

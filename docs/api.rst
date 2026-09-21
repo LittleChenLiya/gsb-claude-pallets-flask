@@ -287,6 +287,15 @@ Stream Helpers
 
 .. autofunction:: stream_with_context
 
+Request Body Replay
+-------------------
+
+.. autoclass:: flask.body_replay.BodyReplayMiddleware
+   :members:
+
+.. autoclass:: flask.body_replay.BodyReplayStream
+   :members:
+
 Useful Internals
 ----------------
 
