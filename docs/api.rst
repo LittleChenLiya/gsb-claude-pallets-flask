@@ -139,6 +139,15 @@ Test CLI Runner
     :members:
 
 
+Request Body Replay
+-------------------
+
+.. currentmodule:: flask
+
+.. autoclass:: RequestBodyReplayMiddleware
+   :members:
+
+
 Application Globals
 -------------------
 

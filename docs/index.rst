@@ -53,6 +53,7 @@ community-maintained extensions to add even more functionality.
    lifecycle
    appcontext
    blueprints
+  body-replay
    extensions
    cli
    server

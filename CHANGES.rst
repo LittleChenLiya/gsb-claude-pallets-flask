@@ -28,6 +28,10 @@ Unreleased
     it's disabled in config. Previously, only disabling worked. :issue:`5916`
 -   ``Flask.select_jinja_autoescape`` uses case-insensitive comparison instead
     of only lower case file extensions. :pr:`6012`
+-   Add ``RequestBodyReplayMiddleware``, a composable WSGI middleware that
+   buffers the request body once with per-route size limits, an in-memory
+   threshold with disk fallback, deterministic 413 errors, and cleanup on
+   client disconnect.
 -   Fix parsing IPv6 with port in ``run`` and the test client. :pr:`6096`
 -   Add ``app.query`` route decorator for the HTTP QUERY method.
 
