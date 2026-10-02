@@ -105,6 +105,27 @@ implementation that Flask is using.
 .. autoclass:: SecureCookieSessionInterface
    :members:
 
+   .. rubric:: Cookie size budget
+
+   Browsers silently ignore cookies that are too large. By default, Flask
+   only emits a warning in that case and still sends the cookie. To
+   explicitly refuse oversized session cookies instead, set a budget in
+   bytes for the final ``Set-Cookie`` header value (signed payload,
+   attributes, and escaping included)::
+
+       from flask.sessions import SecureCookieSessionInterface
+
+       app.session_interface = SecureCookieSessionInterface(cookie_budget=4093)
+
+   If the header would exceed the budget, no ``Set-Cookie`` header is sent
+   (nothing is truncated, and the client's existing cookie is not deleted),
+   and a diagnosable error is logged. Override
+   :meth:`SecureCookieSessionInterface.refuse_oversized_cookie` to customize
+   how the failure is handled. The default, ``cookie_budget=None``, keeps
+   the previous behavior.
+
+   .. versionadded:: 3.2
+
 .. autoclass:: SecureCookieSession
    :members:
 

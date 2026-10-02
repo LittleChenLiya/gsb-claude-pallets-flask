@@ -10,6 +10,7 @@ from datetime import timezone
 from itsdangerous import BadSignature
 from itsdangerous import URLSafeTimedSerializer
 from werkzeug.datastructures import CallbackDict
+from werkzeug.http import dump_cookie
 
 from .json.tag import TaggedJSONSerializer
 
@@ -300,6 +301,67 @@ class SecureCookieSessionInterface(SessionInterface):
     serializer = session_json_serializer
     session_class = SecureCookieSession
 
+    #: The maximum size in bytes allowed for the final ``Set-Cookie``
+    #: header value, including the signed payload, all cookie attributes,
+    #: and any escaping applied when the header is built. If the header
+    #: would exceed this budget, the cookie is explicitly refused: no
+    #: ``Set-Cookie`` header (truncated or otherwise) is sent, and any
+    #: cookie the client already has is left untouched.
+    #:
+    #: The default, ``None``, disables the budget check and preserves the
+    #: previous behavior, where Werkzeug only emits a warning for
+    #: oversized cookies but still sets them.
+    #:
+    #: This can be set as a class attribute, passed to the constructor, or
+    #: returned dynamically by overriding :meth:`get_cookie_budget`.
+    #:
+    #: .. versionadded:: 3.2
+    cookie_budget: int | None = None
+
+    def __init__(self, cookie_budget: int | None = None) -> None:
+        if cookie_budget is not None:
+            self.cookie_budget = cookie_budget
+
+    def get_cookie_budget(self, app: Flask) -> int | None:
+        """Return the maximum size in bytes allowed for the final
+        ``Set-Cookie`` header value for the session cookie, or ``None``
+        to not enforce a budget. The default implementation returns
+        :attr:`cookie_budget`.
+
+        .. versionadded:: 3.2
+        """
+        return self.cookie_budget
+
+    def refuse_oversized_cookie(
+        self,
+        app: Flask,
+        session: SessionMixin,
+        response: Response,
+        size: int,
+        budget: int,
+    ) -> None:
+        """Called when the session cookie cannot be saved because the
+        final ``Set-Cookie`` header value would be ``size`` bytes, which
+        exceeds the configured ``budget``. No cookie is sent, so the
+        client's existing cookie (if any) remains in effect.
+
+        The default implementation logs a diagnosable error. Subclasses
+        may override this to handle the failure differently, for example
+        to raise an exception or record metrics.
+
+        .. versionadded:: 3.2
+        """
+        app.logger.error(
+            "Session cookie refused: the final Set-Cookie header would be"
+            " %d bytes, exceeding the configured budget of %d bytes. The"
+            " session was not saved and no cookie was sent; the client's"
+            " existing cookie is unchanged. Reduce the session data (%d"
+            " keys) or increase 'cookie_budget'.",
+            size,
+            budget,
+            len(session),
+        )
+
     def get_signing_serializer(self, app: Flask) -> URLSafeTimedSerializer | None:
         if not app.secret_key:
             return None
@@ -370,7 +432,38 @@ class SecureCookieSessionInterface(SessionInterface):
             return
 
         expires = self.get_expiration_time(app, session)
+        # The serializer runs exactly once; the signed value is reused
+        # both to measure the final header and to set the cookie.
         val = self.get_signing_serializer(app).dumps(dict(session))  # type: ignore[union-attr]
+
+        budget = self.get_cookie_budget(app)
+
+        if budget is not None:
+            # Build the final header value exactly as it would be sent,
+            # including the signature, attributes, and escaping, and
+            # measure its size in bytes. ``max_size=0`` disables
+            # Werkzeug's warning since the budget policy handles it.
+            header = dump_cookie(
+                name,
+                val,
+                expires=expires,
+                httponly=httponly,
+                domain=domain,
+                path=path,
+                secure=secure,
+                partitioned=partitioned,
+                samesite=samesite,
+                max_size=0,
+            )
+            size = len(header.encode("utf-8"))
+
+            if size > budget:
+                # Refuse explicitly: don't send a truncated or oversized
+                # cookie, and don't delete the client's existing cookie.
+                self.refuse_oversized_cookie(app, session, response, size, budget)
+                response.vary.add("Cookie")
+                return
+
         response.set_cookie(
             name,
             val,

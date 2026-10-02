@@ -30,6 +30,12 @@ Unreleased
     of only lower case file extensions. :pr:`6012`
 -   Fix parsing IPv6 with port in ``run`` and the test client. :pr:`6096`
 -   Add ``app.query`` route decorator for the HTTP QUERY method.
+-   Add an optional cookie budget policy to ``SecureCookieSessionInterface``.
+    When ``cookie_budget`` is set, a session whose final ``Set-Cookie``
+    header would exceed the budget is explicitly refused: no truncated or
+    oversized cookie is sent, the client's existing cookie is left
+    untouched, and a diagnosable error is logged. The default interface is
+    unchanged.
 
 
 Version 3.1.3
