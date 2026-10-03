@@ -30,6 +30,12 @@ Unreleased
     of only lower case file extensions. :pr:`6012`
 -   Fix parsing IPv6 with port in ``run`` and the test client. :pr:`6096`
 -   Add ``app.query`` route decorator for the HTTP QUERY method.
+-   Add ``RequestSnapshot``, ``snapshot_request``, ``bind_snapshot``, and the
+    ``snapshot`` proxy. A snapshot is a read-only copy of request data that
+    captures only allowed header and query fields plus the matched route
+    identity, without reading the request body or holding references to the
+    session, app, or original request. It can be bound for use in background
+    tasks with nesting and async task isolation.
 
 
 Version 3.1.3

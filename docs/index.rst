@@ -52,6 +52,7 @@ community-maintained extensions to add even more functionality.
    views
    lifecycle
    appcontext
+   snapshot
    blueprints
    extensions
    cli

@@ -42,6 +42,54 @@ Incoming Request Data
     This is a proxy. See :ref:`context-visibility` for more information.
 
 
+Request Snapshots
+-----------------
+
+A request snapshot is a read-only copy of request data that is independent of
+the active request context. It captures only the header and query fields that
+the caller allows, along with the matched route identity. It never reads the
+request body and holds no references to the session, app, or original request.
+
+Snapshots are useful when a background task needs a small amount of request
+information without keeping the full request context alive. Create a snapshot
+with :func:`snapshot_request`, then bind it with :func:`bind_snapshot` so the
+:data:`snapshot` proxy is available within the task.
+
+.. code-block:: python
+
+    from flask import snapshot_request, bind_snapshot, snapshot
+
+    @app.route("/")
+    def index():
+        snap = snapshot_request(headers=["X-Custom"], args=["page"])
+        # snap is independent of the request context
+
+        @copy_current_request_context
+        def background_task():
+            with bind_snapshot(snap):
+                print(snapshot.headers["X-Custom"])
+                print(snapshot.args.getlist("page"))
+
+        background_task()
+        return "Done"
+
+.. autoclass:: RequestSnapshot
+    :members:
+
+.. autofunction:: snapshot_request
+
+.. autofunction:: bind_snapshot
+
+.. data:: snapshot
+
+    A proxy to the bound :class:`RequestSnapshot` for the current task.
+
+    This is only available within a :func:`bind_snapshot` block. Unlike
+    :data:`request`, it does not require an active request context.
+
+    This is a proxy. See :ref:`context-visibility` for more information.
+
+
 Response Objects
 ----------------
 
