@@ -10,6 +10,7 @@ from datetime import timezone
 from itsdangerous import BadSignature
 from itsdangerous import URLSafeTimedSerializer
 from werkzeug.datastructures import CallbackDict
+from werkzeug.http import dump_cookie
 
 from .json.tag import TaggedJSONSerializer
 
@@ -19,6 +20,17 @@ if t.TYPE_CHECKING:  # pragma: no cover
     from .app import Flask
     from .wrappers import Request
     from .wrappers import Response
+
+
+class SessionCookieTooLarge(RuntimeError):
+    """Raised when the signed session cookie would exceed the configured
+    strict size budget.
+
+    Unlike Werkzeug's warning, this indicates that the cookie was not sent
+    at all: no truncated cookie is set and any existing cookie is left
+    untouched so that a readable session is not destroyed. The message
+    includes the measured size and the limit so the cause is diagnosable.
+    """
 
 
 class SessionMixin(MutableMapping[str, t.Any]):
@@ -300,6 +312,17 @@ class SecureCookieSessionInterface(SessionInterface):
     serializer = session_json_serializer
     session_class = SecureCookieSession
 
+    #: Strictly enforce the maximum size, in bytes, of the final
+    #: ``Set-Cookie`` header for the session cookie. The budget covers
+    #: the signed value, the signature, the cookie attributes, and any
+    #: escaping. If the budget is exceeded, :class:`SessionCookieTooLarge`
+    #: is raised instead of sending a truncated cookie. ``None`` (the
+    #: default) disables the strict budget, in which case only Werkzeug's
+    #: :data:`~flask.config.MAX_COOKIE_SIZE` warning may be emitted. This
+    #: can also be configured per application with
+    #: :data:`SESSION_COOKIE_MAX_SIZE`.
+    max_cookie_size: int | None = None
+
     def get_signing_serializer(self, app: Flask) -> URLSafeTimedSerializer | None:
         if not app.secret_key:
             return None
@@ -319,6 +342,24 @@ class SecureCookieSessionInterface(SessionInterface):
                 "digest_method": self.digest_method,
             },
         )
+
+    def get_cookie_max_size(self, app: Flask) -> int | None:
+        """The strict maximum size, in bytes, of the final ``Set-Cookie``
+        header for the session cookie. The budget covers the signed value,
+        the signature, the cookie attributes, and any escaping.
+
+        Uses the :data:`SESSION_COOKIE_MAX_SIZE` config if it is set,
+        falling back to the :attr:`max_cookie_size` class attribute. If
+        ``None`` (the default), no strict budget is enforced and only
+        Werkzeug's :data:`~flask.config.MAX_COOKIE_SIZE` warning may be
+        emitted.
+        """
+        value = app.config["SESSION_COOKIE_MAX_SIZE"]  # type: ignore[no-any-return]
+
+        if value is not None:
+            return value  # type: ignore[no-any-return]
+
+        return self.max_cookie_size
 
     def open_session(self, app: Flask, request: Request) -> SecureCookieSession | None:
         s = self.get_signing_serializer(app)
@@ -370,16 +411,60 @@ class SecureCookieSessionInterface(SessionInterface):
             return
 
         expires = self.get_expiration_time(app, session)
+        # The serializer runs exactly once. The resulting value is reused
+        # both to measure the final header and to set the cookie.
         val = self.get_signing_serializer(app).dumps(dict(session))  # type: ignore[union-attr]
-        response.set_cookie(
-            name,
-            val,
-            expires=expires,
-            httponly=httponly,
-            domain=domain,
-            path=path,
-            secure=secure,
-            partitioned=partitioned,
-            samesite=samesite,
-        )
+
+        max_size = self.get_cookie_max_size(app)
+
+        if max_size is None:
+            # No strict budget: preserve the default behavior, including
+            # Werkzeug's MAX_COOKIE_SIZE warning.
+            response.set_cookie(
+                name,
+                val,
+                expires=expires,
+                httponly=httponly,
+                domain=domain,
+                path=path,
+                secure=secure,
+                partitioned=partitioned,
+                samesite=samesite,
+            )
+        else:
+            # Build the final header (signed value, signature, attributes
+            # and escaping) so the exact number of bytes that would be sent
+            # can be measured. The Werkzeug warning is disabled here because
+            # the strict check below enforces the limit itself.
+            header = dump_cookie(
+                name,
+                value=val,
+                expires=expires,
+                path=path,
+                domain=domain,
+                secure=secure,
+                httponly=httponly,
+                samesite=samesite,
+                partitioned=partitioned,
+                max_size=0,
+            )
+            cookie_size = len(header.encode("latin1"))
+
+            if cookie_size > max_size:
+                # Refuse to send a truncated cookie and do not touch the
+                # client's existing cookie, so a still-readable session is
+                # not destroyed. Mark the session as not modified so that
+                # response finalization does not attempt to save it again
+                # and re-raise while handling this error.
+                session.modified = False
+                raise SessionCookieTooLarge(
+                    f"The {name!r} session cookie would be {cookie_size} bytes,"
+                    f" exceeding the strict SESSION_COOKIE_MAX_SIZE limit of"
+                    f" {max_size} bytes. The session was not saved and no cookie"
+                    f" was sent. Reduce the amount of data stored in the session"
+                    f" or increase the limit."
+                )
+
+            response.headers.add("Set-Cookie", header)
+
         response.vary.add("Cookie")

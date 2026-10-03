@@ -30,6 +30,10 @@ Unreleased
     of only lower case file extensions. :pr:`6012`
 -   Fix parsing IPv6 with port in ``run`` and the test client. :pr:`6096`
 -   Add ``app.query`` route decorator for the HTTP QUERY method.
+-   Add ``SESSION_COOKIE_MAX_SIZE`` to strictly enforce a size budget on the
+    final session cookie header. When set, exceeding the budget raises
+    ``SessionCookieTooLarge`` instead of only warning; no truncated cookie is
+    sent and the client's existing cookie is left untouched.
 
 
 Version 3.1.3
