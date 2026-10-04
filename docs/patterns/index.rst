@@ -33,6 +33,7 @@ collected in the following pages.
    favicon
    streaming
    deferredcallbacks
+   handoff
    methodoverrides
    requestchecksum
    celery

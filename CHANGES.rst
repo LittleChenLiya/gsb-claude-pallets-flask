@@ -30,6 +30,10 @@ Unreleased
     of only lower case file extensions. :pr:`6012`
 -   Fix parsing IPv6 with port in ``run`` and the test client. :pr:`6096`
 -   Add ``app.query`` route decorator for the HTTP QUERY method.
+-   Add ``stage_handoff`` and ``RequestHandoff`` to copy selected form
+    fields and uploaded files into a controlled staging directory during a
+    request, producing a request-context-independent object that can safely
+    be consumed by background work after the response is sent.
 
 
 Version 3.1.3

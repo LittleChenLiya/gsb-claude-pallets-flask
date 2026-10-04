@@ -706,3 +706,33 @@ Command Line Interface
 .. autodata:: run_command
 
 .. autodata:: shell_command
+
+Background Work Handoff
+-----------------------
+
+.. currentmodule:: flask
+
+See :doc:`/patterns/handoff` for the lifecycle and usage notes.
+
+.. autofunction:: stage_handoff
+
+.. autoclass:: RequestHandoff
+   :members:
+
+.. autoclass:: StagedFile
+   :members:
+
+.. autoclass:: HandoffError
+   :members:
+
+.. autoclass:: HandoffFieldsError
+   :members:
+
+.. autoclass:: HandoffFileError
+   :members:
+
+.. autoclass:: HandoffLimitError
+   :members:
+
+.. autoclass:: HandoffCopyError
+   :members:
