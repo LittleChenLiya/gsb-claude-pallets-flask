@@ -10,6 +10,10 @@ from .globals import current_app as current_app
 from .globals import g as g
 from .globals import request as request
 from .globals import session as session
+from .handoff import handoff_request as handoff_request
+from .handoff import HandoffError as HandoffError
+from .handoff import HandoffFile as HandoffFile
+from .handoff import RequestHandoff as RequestHandoff
 from .helpers import abort as abort
 from .helpers import flash as flash
 from .helpers import get_flashed_messages as get_flashed_messages

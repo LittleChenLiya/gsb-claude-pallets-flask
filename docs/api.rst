@@ -42,6 +42,20 @@ Incoming Request Data
     This is a proxy. See :ref:`context-visibility` for more information.
 
 
+Handoff of Uploaded Data
+------------------------
+
+.. autoclass:: flask.RequestHandoff
+    :members:
+
+.. autoclass:: flask.HandoffFile
+    :members:
+
+.. autoclass:: flask.HandoffError
+    :members:
+
+.. automethod:: flask.handoff_request
+
 Response Objects
 ----------------
 

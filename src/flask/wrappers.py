@@ -14,6 +14,8 @@ from .helpers import _split_blueprint_path
 if t.TYPE_CHECKING:  # pragma: no cover
     from werkzeug.routing import Rule
 
+    from .handoff import RequestHandoff
+
 
 class Request(RequestBase):
     """The request object used by default in Flask.  Remembers the
@@ -208,6 +210,60 @@ class Request(RequestBase):
             from .debughelpers import attach_enctype_error_multidict
 
             attach_enctype_error_multidict(self)
+
+    def handoff(
+        self,
+        fields: t.Iterable[str] | None = None,
+        *,
+        max_file_size: int | None = None,
+        max_total_size: int | None = None,
+        directory: str | None = None,
+    ) -> RequestHandoff:
+        """Copy selected form fields and uploaded files out of the request
+        into a private temporary area, returning a
+        :class:`~flask.RequestHandoff` that is detached from the request.
+
+        Use this when background work should only receive part of the uploaded
+        data. The handoff holds no reference to the request, the request
+        context, or the original file handles, so it can safely be read from a
+        background thread after the request context has been popped.
+
+        Only the field names given in ``fields`` are copied. Fields that are
+        not listed are ignored. Uploaded files are copied byte-for-byte; the
+        original filename is retained as metadata only and never influences the
+        target path, so malicious filenames cannot escape the temporary area.
+
+        Limits are enforced while copying: ``max_file_size`` limits the size of
+        a single file, ``max_total_size`` limits the combined size of all copied
+        files. If a limit is exceeded or copying fails for any other reason,
+        the partially copied area is removed, no handoff is returned, and
+        :exc:`~flask.HandoffError` is raised. The handoff is only published
+        once every copy has succeeded.
+
+        Call :meth:`~flask.RequestHandoff.close` on the handoff when the
+        background work is done to remove the temporary files. Closing is
+        idempotent. The handoff also works as a context manager.
+
+        :param fields: the form field names to copy. If ``None``, every form
+            field and file is copied.
+        :param max_file_size: the maximum size in bytes of a single copied
+            file. ``None`` means no limit.
+        :param max_total_size: the maximum total size in bytes of all copied
+            files. ``None`` means no limit.
+        :param directory: a base directory in which to create the private
+            temporary area. If ``None``, the system default is used.
+
+        .. versionadded:: 3.2
+        """
+        from .handoff import handoff_request
+
+        return handoff_request(
+            self,
+            fields,
+            max_file_size=max_file_size,
+            max_total_size=max_total_size,
+            directory=directory,
+        )
 
     def on_json_loading_failed(self, e: ValueError | None) -> t.Any:
         try:

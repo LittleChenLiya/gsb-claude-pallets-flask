@@ -5,6 +5,12 @@ Unreleased
 
 -   Drop support for Python 3.9. :pr:`5730`
 -   Remove previously deprecated code: ``__version__``. :pr:`5648`
+-   Added ``Request.handoff`` and the ``flask.handoff`` module: copy selected
+    form fields and uploaded files into a private temporary area and return a
+    ``RequestHandoff`` that is detached from the request. The handoff holds no
+    reference to the request or its file handles, so it is safe to use from a
+    background thread after the request context has been popped. Call
+    ``RequestHandoff.close`` to remove the temporary area.
 -   ``RequestContext`` has merged with ``AppContext``. ``RequestContext`` is now
     a deprecated alias. If an app context is already pushed, it is not reused
     when dispatching a request. This greatly simplifies the internal code for tracking
