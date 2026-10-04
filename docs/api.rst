@@ -42,6 +42,37 @@ Incoming Request Data
     This is a proxy. See :ref:`context-visibility` for more information.
 
 
+Request Snapshots
+-----------------
+
+.. currentmodule:: flask
+
+Background tasks often need a small amount of request data after the request
+has ended. A :class:`RequestSnapshot` copies only the caller-allowed header
+names and query argument keys, along with the route identity, into an
+immutable object that does not depend on an active request context. The body
+is never read, lazy form parsing is never triggered, and the snapshot holds
+no reference to the session, the app, or the original request.
+
+.. autoclass:: RequestSnapshot
+    :members:
+
+.. autofunction:: snapshot_request
+
+.. data:: current_snapshot
+
+    A proxy to the :class:`RequestSnapshot` bound to the current context with
+    :meth:`RequestSnapshot.bind` or :func:`bind_snapshot`.
+
+    This is independent of the :data:`request` proxy, which it never
+    replaces.
+
+.. autofunction:: bind_snapshot
+
+.. autoclass:: SnapshotBinding
+    :members:
+
+
 Response Objects
 ----------------
 

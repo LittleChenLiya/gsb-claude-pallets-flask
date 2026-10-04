@@ -30,6 +30,12 @@ Unreleased
     of only lower case file extensions. :pr:`6012`
 -   Fix parsing IPv6 with port in ``run`` and the test client. :pr:`6096`
 -   Add ``app.query`` route decorator for the HTTP QUERY method.
+-   Add ``snapshot_request`` to capture a read-only ``RequestSnapshot`` of
+    caller-allowed header and query fields plus the route identity, without
+    reading the body or keeping references to the request, session, or app.
+    A snapshot can be temporarily bound in another context, such as an async
+    background task, through the independent ``current_snapshot`` proxy with
+    ``snapshot.bind()`` or ``bind_snapshot``.
 
 
 Version 3.1.3
