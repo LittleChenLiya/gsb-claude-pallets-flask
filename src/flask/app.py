@@ -1418,6 +1418,12 @@ class Flask(App):
         if not self.session_interface.is_null_session(ctx._get_session()):
             self.session_interface.save_session(self, ctx._get_session(), response)
 
+        # Merge the headers recorded during negotiation into Vary. This
+        # runs after all after_request functions, so headers they record
+        # are included too, and a 304 produced by make_conditional keeps
+        # the same negotiation identity.
+        ctx.vary.apply(response)
+
         return response
 
     def do_teardown_request(

@@ -23,6 +23,7 @@ collected in the following pages.
    sqlalchemy
    fileuploads
    caching
+   vary
    viewdecorators
    wtforms
    templateinheritance

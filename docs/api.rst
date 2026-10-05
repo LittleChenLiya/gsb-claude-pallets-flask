@@ -168,6 +168,19 @@ thing, like it does for :data:`.request` and :data:`.session`.
     .. versionchanged:: 0.10
         Bound to the application context instead of the request context.
 
+.. data:: vary
+
+    A proxy to the :class:`.Vary` recorder for the current request. Use
+    :meth:`~Vary.record` to record each request header used to select a
+    response representation. The recorded headers are merged into the
+    response's ``Vary`` header at the end of the request.
+
+    This is only available when an :doc:`app context </appcontext>` is active.
+
+    This is a proxy. See :ref:`context-visibility` for more information.
+
+    .. versionadded:: 3.2
+
 .. autoclass:: flask.ctx._AppCtxGlobals
     :members:
 
@@ -187,6 +200,9 @@ Useful Functions and Classes
     This is only available when an :doc:`app context </appcontext>` is active.
 
     This is a proxy. See :ref:`context-visibility` for more information.
+
+.. autoclass:: Vary
+    :members:
 
 .. autofunction:: has_request_context
 

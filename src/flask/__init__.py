@@ -10,6 +10,7 @@ from .globals import current_app as current_app
 from .globals import g as g
 from .globals import request as request
 from .globals import session as session
+from .globals import vary as vary
 from .helpers import abort as abort
 from .helpers import flash as flash
 from .helpers import get_flashed_messages as get_flashed_messages
@@ -35,5 +36,6 @@ from .templating import render_template as render_template
 from .templating import render_template_string as render_template_string
 from .templating import stream_template as stream_template
 from .templating import stream_template_string as stream_template_string
+from .vary import Vary as Vary
 from .wrappers import Request as Request
 from .wrappers import Response as Response

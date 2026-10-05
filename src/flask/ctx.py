@@ -13,6 +13,7 @@ from .globals import _cv_app
 from .helpers import _CollectErrors
 from .signals import appcontext_popped
 from .signals import appcontext_pushed
+from .vary import Vary
 
 if t.TYPE_CHECKING:
     import typing_extensions as te
@@ -322,6 +323,12 @@ class AppContext:
         self._flashes: list[tuple[str, str]] | None = None
         self._after_request_functions: list[ft.AfterRequestCallable[t.Any]] = []
 
+        self.vary: Vary = Vary()
+        """The response negotiation recorder for this context. Accessed
+        through :data:`flask.vary`. Shared by all callbacks handling the
+        request, including nested blueprints.
+        """
+
         try:
             self.url_adapter = app.create_url_adapter(self._request)
         except HTTPException as e:
@@ -361,11 +368,15 @@ class AppContext:
 
         .. versionadded:: 0.10
         """
-        return self.__class__(
+        rv = self.__class__(
             self.app,
             request=self._request,
             session=self._session,
         )
+        # The copied context handles the same request, so share the
+        # negotiation recorder and its recorded headers.
+        rv.vary = self.vary
+        return rv
 
     @property
     def request(self) -> Request:

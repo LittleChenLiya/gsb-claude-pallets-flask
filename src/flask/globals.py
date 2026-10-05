@@ -10,6 +10,7 @@ if t.TYPE_CHECKING:  # pragma: no cover
     from .ctx import _AppCtxGlobals
     from .ctx import AppContext
     from .sessions import SessionMixin
+    from .vary import Vary
     from .wrappers import Request
 
     T = t.TypeVar("T", covariant=True)
@@ -28,6 +29,8 @@ if t.TYPE_CHECKING:  # pragma: no cover
     class RequestProxy(ProxyMixin[Request], Request): ...
 
     class SessionMixinProxy(ProxyMixin[SessionMixin], SessionMixin): ...
+
+    class VaryProxy(ProxyMixin[Vary], Vary): ...
 
 
 _no_app_msg = """\
@@ -59,6 +62,9 @@ request: RequestProxy = LocalProxy(  # type: ignore[assignment]
 )
 session: SessionMixinProxy = LocalProxy(  # type: ignore[assignment]
     _cv_app, "session", unbound_message=_no_req_msg
+)
+vary: VaryProxy = LocalProxy(  # type: ignore[assignment]
+    _cv_app, "vary", unbound_message=_no_app_msg
 )
 
 
