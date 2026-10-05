@@ -120,6 +120,52 @@ On top of that you can register blueprints multiple times though not every
 blueprint might respond properly to that.  In fact it depends on how the
 blueprint is implemented if it can be mounted more than once.
 
+Preflighting Blueprint Registration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 3.2
+
+Before registering a blueprint, you can ask Flask to statically plan the
+registration and list the conflicts it would introduce, without modifying
+the application and without calling any user callbacks::
+
+    >>> plan = app.plan_blueprint(simple_page, url_prefix='/pages')
+    >>> plan.ok
+    True
+
+The plan walks the blueprint tree and follows the same name prefix, URL
+prefix, and subdomain rules that :meth:`~Flask.register_blueprint` uses. It
+lists the endpoint, URL rule, and CLI name conflicts that the registration
+would introduce::
+
+    >>> plan.endpoints
+    ['simple_page.show']
+    >>> plan.rules
+    ['/pages/<page>', '/pages/']
+    >>> plan.cli_names
+    []
+
+If the registration would introduce a conflict, :attr:`~BlueprintRegistrationPlan.ok`
+is ``False`` and :attr:`~BlueprintRegistrationPlan.conflicts` lists each
+one::
+
+    >>> other = Blueprint('simple_page', __name__)
+    >>> app.register_blueprint(other)
+    >>> plan = app.plan_blueprint(simple_page)
+    >>> plan.ok
+    False
+    >>> for conflict in plan.conflicts:
+    ...     print(conflict.kind, conflict.name)
+    blueprint simple_page
+
+The plan does not register the blueprint. Use :meth:`~Flask.register_blueprint`
+to perform the actual registration once the conflicts have been resolved.
+
+Deferred setup functions that cannot be interpreted statically (for example
+callbacks registered with :meth:`~Blueprint.record`) are marked as unknown
+in :attr:`~BlueprintRegistrationPlan.unknown`. The preflight does not call
+these functions.
+
 Nesting Blueprints
 ------------------
 

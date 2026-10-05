@@ -28,6 +28,7 @@ from ..json.provider import JSONProvider
 from ..logging import create_logger
 from ..templating import DispatchingJinjaLoader
 from ..templating import Environment
+from .blueprints import BlueprintRegistrationPlan
 from .scaffold import _endpoint_from_view_func
 from .scaffold import find_package
 from .scaffold import Scaffold
@@ -593,6 +594,33 @@ class App(Scaffold):
         .. versionadded:: 0.7
         """
         blueprint.register(self, options)
+
+    def plan_blueprint(
+        self,
+        blueprint: Blueprint,
+        **options: t.Any,
+    ) -> BlueprintRegistrationPlan:
+        """Preflight a blueprint registration without modifying the
+        application.
+
+        Statically plans the registration of *blueprint* with the given
+        *options* and returns a :class:`~flask.sansio.blueprints.BlueprintRegistrationPlan`
+        describing the endpoint, URL rule, and CLI name conflicts that the
+        registration would introduce, as well as any deferred functions that
+        could not be interpreted statically.
+
+        The plan does not call any user callbacks and does not modify the
+        application's blueprints, URL map, view functions, or CLI. Use
+        :meth:`register_blueprint` to perform the actual registration once
+        the conflicts have been resolved.
+
+        :param blueprint: The blueprint to plan.
+        :param options: Keyword arguments that would be passed to
+            :meth:`register_blueprint`.
+
+        .. versionadded:: 3.2
+        """
+        return BlueprintRegistrationPlan(self, blueprint, options)
 
     def iter_blueprints(self) -> t.ValuesView[Blueprint]:
         """Iterates over all blueprints by the order they were registered.

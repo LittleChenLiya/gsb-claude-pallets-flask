@@ -1113,3 +1113,213 @@ def test_blueprint_renaming(app, client) -> None:
     assert client.get("/b/a/").data == b"alt.sub.index2"
     assert client.get("/a/error").data == b"Error"
     assert client.get("/b/error").data == b"Error"
+
+
+# --- Blueprint registration preflight --------------------------------------
+
+
+def test_preflight_same_name_conflict(app):
+    """Two blueprints with the same registration name conflict."""
+    a = flask.Blueprint("api", __name__)
+    b = flask.Blueprint("api", __name__)
+
+    @a.route("/a")
+    def a_view():
+        return "a"
+
+    @b.route("/b")
+    def b_view():
+        return "b"
+
+    app.register_blueprint(a)
+    plan = app.plan_blueprint(b)
+
+    assert not plan.ok
+    assert len(plan.conflicts) == 1
+    assert plan.conflicts[0].kind == "blueprint"
+    assert plan.conflicts[0].name == "api"
+
+
+def test_preflight_different_name_prefix_passes(app):
+    """Re-registering the same blueprint with a different name is legal."""
+    bp = flask.Blueprint("api", __name__)
+
+    @bp.route("/foo")
+    def foo():
+        return "foo"
+
+    app.register_blueprint(bp)
+    plan = app.plan_blueprint(bp, name="other")
+
+    assert plan.ok
+    assert plan.endpoints == ["other.foo"]
+    assert plan.rules == ["/foo"]
+
+
+def test_preflight_nested_different_prefixes(app):
+    """Nested blueprints with different name prefixes are legal."""
+    parent1 = flask.Blueprint("p1", __name__)
+    parent2 = flask.Blueprint("p2", __name__)
+    child = flask.Blueprint("child", __name__)
+
+    @child.route("/c")
+    def child_view():
+        return "c"
+
+    parent1.register_blueprint(child)
+    parent2.register_blueprint(child)
+
+    plan = app.plan_blueprint(parent1)
+
+    assert plan.ok
+    assert plan.endpoints == ["p1.child.child_view"]
+    assert plan.rules == ["/c"]
+
+
+def test_preflight_does_not_modify_app(app):
+    """The preflight does not modify the application state."""
+    bp = flask.Blueprint("api", __name__)
+
+    @bp.route("/foo")
+    def foo():
+        return "foo"
+
+    @bp.route("/bar")
+    def bar():
+        return "bar"
+
+    url_map_before = str(app.url_map)
+    view_funcs_before = dict(app.view_functions)
+    blueprints_before = dict(app.blueprints)
+    cli_before = set(app.cli.commands)
+
+    app.plan_blueprint(bp, url_prefix="/api")
+
+    assert str(app.url_map) == url_map_before
+    assert dict(app.view_functions) == view_funcs_before
+    assert dict(app.blueprints) == blueprints_before
+    assert set(app.cli.commands) == cli_before
+
+
+def test_preflight_does_not_call_deferred_functions(app):
+    """The preflight does not call user deferred functions."""
+    bp = flask.Blueprint("api", __name__)
+    side_effects = []
+
+    def custom_callback(state):
+        side_effects.append("called")
+
+    bp.record(custom_callback)
+
+    plan = app.plan_blueprint(bp)
+
+    assert side_effects == []
+    assert len(plan.unknown) == 1
+
+
+def test_preflight_marks_unknown_deferred_functions(app):
+    """Deferred functions that cannot be statically interpreted are marked
+    unknown."""
+    bp = flask.Blueprint("api", __name__)
+
+    @bp.route("/foo")
+    def foo():
+        return "foo"
+
+    def custom_callback(state):
+        state.app.add_url_rule("/bar", "bar", lambda: "bar")
+
+    bp.record(custom_callback)
+
+    plan = app.plan_blueprint(bp)
+
+    assert len(plan.unknown) == 1
+    assert plan.unknown[0] is custom_callback
+
+
+def test_preflight_endpoint_conflict(app):
+    """The preflight detects endpoint conflicts."""
+    bp = flask.Blueprint("api", __name__)
+
+    @bp.route("/foo")
+    def foo():
+        return "foo"
+
+    app.add_url_rule("/existing", "api.foo", lambda: "existing")
+
+    plan = app.plan_blueprint(bp)
+
+    assert not plan.ok
+    assert any(c.kind == "endpoint" and c.name == "api.foo" for c in plan.conflicts)
+
+
+def test_preflight_cli_conflict(app):
+    """The preflight detects CLI name conflicts."""
+    bp = flask.Blueprint("cli_test", __name__)
+
+    @bp.cli.command("hello")
+    def hello():
+        pass
+
+    app.cli.add_command(flask.cli.AppGroup("cli_test"))
+
+    plan = app.plan_blueprint(bp)
+
+    assert not plan.ok
+    assert any(c.kind == "cli" and c.name == "cli_test" for c in plan.conflicts)
+
+
+def test_preflight_cli_custom_group(app):
+    """A custom CLI group name avoids the conflict."""
+    bp = flask.Blueprint("cli_test", __name__)
+
+    @bp.cli.command("hello")
+    def hello():
+        pass
+
+    app.cli.add_command(flask.cli.AppGroup("cli_test"))
+
+    plan = app.plan_blueprint(bp, cli_group="custom")
+
+    assert plan.ok
+    assert plan.cli_names == ["custom"]
+
+
+def test_preflight_cli_merge_commands(app):
+    """With cli_group=None, commands are merged into the app's CLI group."""
+    bp = flask.Blueprint("cli_test", __name__)
+
+    @bp.cli.command("hello")
+    def hello():
+        pass
+
+    plan = app.plan_blueprint(bp, cli_group=None)
+
+    assert plan.ok
+    assert plan.cli_names == ["hello"]
+
+
+def test_preflight_static_route(app):
+    """The preflight plans the static route when a static folder is set."""
+    bp = flask.Blueprint(
+        "static_bp", __name__, static_folder="static", static_url_path="/static"
+    )
+
+    plan = app.plan_blueprint(bp)
+
+    assert plan.ok
+    assert plan.endpoints == ["static_bp.static"]
+    assert plan.rules == ["/static/<path:filename>"]
+
+
+def test_preflight_repr(app):
+    """The preflight has a useful repr."""
+    bp = flask.Blueprint("api", __name__)
+
+    plan = app.plan_blueprint(bp)
+    assert repr(plan) == "<BlueprintRegistrationPlan 'api': ok>"
+
+    other = flask.Blueprint("api", __name__)
+    app.register_blueprint(other)
+    plan2 = app.plan_blueprint(bp)
+    assert "conflict" in repr(plan2)

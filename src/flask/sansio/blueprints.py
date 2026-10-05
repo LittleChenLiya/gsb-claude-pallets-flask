@@ -690,3 +690,396 @@ class Blueprint(Scaffold):
             lambda s: s.app.url_default_functions.setdefault(None, []).append(f)
         )
         return f
+
+
+class BlueprintConflict:
+    """A conflict that registering a blueprint would introduce.
+
+    Returned by :meth:`BlueprintRegistrationPlan.conflicts`. Each conflict
+    describes a single item -- a blueprint name, endpoint, URL rule, or CLI
+    name -- that would collide with existing application state or with
+    another item in the same registration.
+
+    :param kind: The kind of conflict. One of ``"blueprint"``,
+        ``"endpoint"``, ``"url_rule"``, or ``"cli"``.
+    :param name: The conflicting item (blueprint name, endpoint, rule, or CLI
+        name).
+    :param message: A human-readable description of the conflict.
+    :param blueprint: The blueprint that would introduce the conflict, if
+        known.
+    """
+
+    def __init__(
+        self,
+        kind: str,
+        name: str,
+        message: str,
+        blueprint: Blueprint | None = None,
+    ) -> None:
+        self.kind = kind
+        self.name = name
+        self.message = message
+        self.blueprint = blueprint
+
+    def __repr__(self) -> str:
+        return f"<BlueprintConflict {self.kind!r} {self.name!r}: {self.message}>"
+
+
+class _RecordingApp:
+    """A stand-in for the application that records ``add_url_rule`` calls
+    instead of executing them.
+
+    This lets the preflight follow the exact logic of
+    :meth:`BlueprintSetupState.add_url_rule` (URL prefix joining, endpoint
+    prefixing, defaults merging) without touching the application's URL map
+    or view functions.
+    """
+
+    def __init__(self) -> None:
+        self.url_rules: list[
+            tuple[str, str, t.Any, dict[str, t.Any]]
+        ] = []
+
+    def add_url_rule(
+        self,
+        rule: str,
+        endpoint: str,
+        view_func: ft.RouteCallable | None = None,
+        **options: t.Any,
+    ) -> None:
+        self.url_rules.append((rule, endpoint, view_func, options))
+
+
+class BlueprintRegistrationPlan:
+    """The result of statically planning a blueprint registration.
+
+    Create a plan with :meth:`~flask.sansio.app.App.plan_blueprint` (or
+    :meth:`~flask.Flask.plan_blueprint`). The plan walks the blueprint tree
+    and statically determines the endpoint, URL rule, and CLI name conflicts
+    that registering the blueprint would introduce, without calling any user
+    callbacks and without modifying the application.
+
+    The plan does not register the blueprint. Use
+    :meth:`~flask.Flask.register_blueprint` to perform the actual
+    registration once the conflicts have been resolved.
+
+    :param app: The application the blueprint would be registered on.
+    :param blueprint: The blueprint to plan.
+    :param options: Keyword arguments that would be passed to
+        :meth:`~flask.Flask.register_blueprint`.
+
+    .. versionadded:: 3.2
+    """
+
+    def __init__(
+        self,
+        app: App,
+        blueprint: Blueprint,
+        options: dict[str, t.Any],
+    ) -> None:
+        self._app = app
+        self.blueprint = blueprint
+        self.options = options
+
+        #: A list of :class:`BlueprintConflict` objects describing the
+        #: conflicts the registration would introduce.
+        self.conflicts: list[BlueprintConflict] = []
+
+        #: A list of deferred setup functions that could not be interpreted
+        #: statically and would be called during real registration. The
+        #: preflight does not call these functions.
+        self.unknown: list[DeferredSetupFunction] = []
+
+        #: The endpoints the registration would add, in order.
+        self.endpoints: list[str] = []
+
+        #: The URL rules the registration would add, in order.
+        self.rules: list[str] = []
+
+        #: The CLI names the registration would add, in order.
+        self.cli_names: list[str] = []
+
+        self._seen_names: set[str] = set()
+        self._seen_endpoints: dict[str, t.Any] = {}
+        self._seen_rules: set[str] = set()
+        self._seen_cli: set[str] = set()
+
+        self._plan(blueprint, options)
+
+    @property
+    def ok(self) -> bool:
+        """``True`` if the registration would not introduce any conflicts."""
+        return not self.conflicts
+
+    #: An alias for :attr:`ok`.
+    is_valid = ok
+
+    def __repr__(self) -> str:
+        status = "ok" if self.ok else f"{len(self.conflicts)} conflict(s)"
+        return f"<BlueprintRegistrationPlan {self.blueprint.name!r}: {status}>"
+
+    def _plan(
+        self,
+        blueprint: Blueprint,
+        options: dict[str, t.Any],
+        name_prefix: str = "",
+        parent_url_prefix: str | None = None,
+        parent_subdomain: str | None = None,
+    ) -> None:
+        # Compute the dotted registration name, mirroring Blueprint.register.
+        self_name = options.get("name", blueprint.name)
+        name = f"{name_prefix}.{self_name}".lstrip(".")
+
+        # Compute the effective URL prefix, mirroring the nested-blueprint
+        # merge in Blueprint.register.
+        bp_url_prefix = options.get("url_prefix")
+        if bp_url_prefix is None:
+            bp_url_prefix = blueprint.url_prefix
+
+        if parent_url_prefix is not None and bp_url_prefix is not None:
+            url_prefix = (
+                parent_url_prefix.rstrip("/") + "/" + bp_url_prefix.lstrip("/")
+            )
+        elif bp_url_prefix is not None:
+            url_prefix = bp_url_prefix
+        elif parent_url_prefix is not None:
+            url_prefix = parent_url_prefix
+        else:
+            url_prefix = None
+
+        # Compute the effective subdomain, mirroring the nested-blueprint
+        # merge in Blueprint.register.
+        bp_subdomain = options.get("subdomain")
+        if bp_subdomain is None:
+            bp_subdomain = blueprint.subdomain
+
+        if parent_subdomain is not None and bp_subdomain is not None:
+            subdomain = bp_subdomain + "." + parent_subdomain
+        elif bp_subdomain is not None:
+            subdomain = bp_subdomain
+        elif parent_subdomain is not None:
+            subdomain = parent_subdomain
+        else:
+            subdomain = None
+
+        # A blueprint name conflict is a hard error in real registration.
+        if name in self._app.blueprints:
+            self.conflicts.append(
+                BlueprintConflict(
+                    "blueprint",
+                    name,
+                    f"The blueprint name {name!r} is already registered for a"
+                    " different blueprint. Use 'name=' to provide a unique"
+                    " name.",
+                    blueprint,
+                )
+            )
+        elif name in self._seen_names:
+            self.conflicts.append(
+                BlueprintConflict(
+                    "blueprint",
+                    name,
+                    f"The blueprint name {name!r} would be registered more"
+                    " than once.",
+                    blueprint,
+                )
+            )
+        self._seen_names.add(name)
+
+        # Create a setup state with a recording stand-in for the app, so the
+        # state's real rule/endpoint logic is followed without mutating the
+        # application.
+        recording_app = _RecordingApp()
+        merged_options = dict(options)
+        merged_options["url_prefix"] = url_prefix
+        merged_options["subdomain"] = subdomain
+        merged_options["name_prefix"] = name_prefix
+        first_registration = not any(
+            bp is blueprint for bp in self._app.blueprints.values()
+        )
+        state = blueprint.make_setup_state(
+            t.cast("App", recording_app), merged_options, first_registration
+        )
+
+        # The static route is always registered when a static folder is set.
+        if blueprint.has_static_folder:
+            state.add_url_rule(
+                f"{blueprint.static_url_path}/<path:filename>",
+                view_func=blueprint.send_static_file,  # type: ignore[attr-defined]
+                endpoint="static",
+            )
+
+        # Interpret deferred functions. The lambdas created by
+        # Blueprint.add_url_rule can be interpreted statically; anything else
+        # (user callbacks, record_once wrappers, etc.) is marked unknown
+        # rather than called.
+        for deferred in blueprint.deferred_functions:
+            if not self._interpret(deferred, state):
+                self.unknown.append(deferred)
+
+        # Check the recorded URL rules for endpoint and rule conflicts.
+        for rule, endpoint, view_func, _rule_options in recording_app.url_rules:
+            self.endpoints.append(endpoint)
+            self.rules.append(rule)
+
+            existing_func = self._app.view_functions.get(endpoint)
+            if existing_func is not None and existing_func != view_func:
+                self.conflicts.append(
+                    BlueprintConflict(
+                        "endpoint",
+                        endpoint,
+                        f"The endpoint {endpoint!r} is already registered to a"
+                        " different view function.",
+                        blueprint,
+                    )
+                )
+            elif (
+                endpoint in self._seen_endpoints
+                and self._seen_endpoints[endpoint] != view_func
+            ):
+                self.conflicts.append(
+                    BlueprintConflict(
+                        "endpoint",
+                        endpoint,
+                        f"The endpoint {endpoint!r} would be registered to more"
+                        " than one view function.",
+                        blueprint,
+                    )
+                )
+            self._seen_endpoints[endpoint] = view_func
+
+            # A URL rule path collision is not a hard error (werkzeug allows
+            # duplicate rules), but two rules with the same path in the same
+            # registration would shadow each other. Only flag duplicates
+            # within this registration -- re-registering the same blueprint
+            # with a different name is legal and would otherwise be flagged.
+            if rule in self._seen_rules:
+                self.conflicts.append(
+                    BlueprintConflict(
+                        "url_rule",
+                        rule,
+                        f"The URL rule {rule!r} would be registered more than"
+                        " once.",
+                        blueprint,
+                    )
+                )
+            self._seen_rules.add(rule)
+
+        # Check CLI name conflicts, mirroring Blueprint.register.
+        cli_group = options.get("cli_group", blueprint.cli_group)
+
+        if blueprint.cli.commands:
+            if cli_group is None:
+                # Commands are merged directly into the app's CLI group.
+                for cmd_name in blueprint.cli.commands:
+                    self.cli_names.append(cmd_name)
+                    if (
+                        cmd_name in self._app.cli.commands
+                        or cmd_name in self._seen_cli
+                    ):
+                        self.conflicts.append(
+                            BlueprintConflict(
+                                "cli",
+                                cmd_name,
+                                f"The CLI command {cmd_name!r} is already"
+                                " registered.",
+                                blueprint,
+                            )
+                        )
+                    self._seen_cli.add(cmd_name)
+            elif cli_group is _sentinel:
+                # The blueprint's CLI group is added under its dotted name.
+                self.cli_names.append(name)
+                if name in self._app.cli.commands or name in self._seen_cli:
+                    self.conflicts.append(
+                        BlueprintConflict(
+                            "cli",
+                            name,
+                            f"The CLI group {name!r} is already registered.",
+                            blueprint,
+                        )
+                    )
+                self._seen_cli.add(name)
+            else:
+                # The blueprint's CLI group is added under a custom name.
+                self.cli_names.append(cli_group)
+                if (
+                    cli_group in self._app.cli.commands
+                    or cli_group in self._seen_cli
+                ):
+                    self.conflicts.append(
+                        BlueprintConflict(
+                            "cli",
+                            cli_group,
+                            f"The CLI group {cli_group!r} is already"
+                            " registered.",
+                            blueprint,
+                        )
+                    )
+                self._seen_cli.add(cli_group)
+
+        # Recurse into nested blueprints, mirroring Blueprint.register.
+        for child, child_options in blueprint._blueprints:
+            child_options = dict(child_options)
+            self._plan(
+                child,
+                child_options,
+                name_prefix=name,
+                parent_url_prefix=url_prefix,
+                parent_subdomain=subdomain,
+            )
+
+    def _interpret(
+        self,
+        deferred: DeferredSetupFunction,
+        state: BlueprintSetupState,
+    ) -> bool:
+        """Try to interpret a deferred setup function as a URL rule.
+
+        The lambdas created by :meth:`Blueprint.add_url_rule` close over the
+        same five variables, so they can be interpreted statically by
+        reading their closure cells. Any other function (a user callback, a
+        ``record_once`` wrapper, etc.) cannot be interpreted and is marked
+        unknown rather than called.
+
+        Returns ``True`` if the function was interpreted (and the rule was
+        recorded on the state), ``False`` otherwise.
+        """
+        try:
+            code = deferred.__code__
+            closure = deferred.__closure__
+        except AttributeError:
+            return False
+
+        if closure is None:
+            return False
+
+        # The lambda created by Blueprint.add_url_rule closes over these
+        # five variables. co_freevars is ordered alphabetically, so extract
+        # the values by name rather than by position.
+        freevars = code.co_freevars
+        if set(freevars) != {
+            "rule",
+            "endpoint",
+            "view_func",
+            "provide_automatic_options",
+            "options",
+        }:
+            return False
+
+        try:
+            values = {
+                name: cell.cell_contents
+                for name, cell in zip(freevars, closure)
+            }
+        except ValueError:
+            return False
+
+        state.add_url_rule(
+            values["rule"],
+            values["endpoint"],
+            values["view_func"],
+            provide_automatic_options=values["provide_automatic_options"],
+            **values["options"],
+        )
+        return True
