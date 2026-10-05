@@ -313,3 +313,50 @@ at the application level using the ``request`` proxy object::
             return ex
 
 See :doc:`/errorhandling`.
+
+Preflighting Registration
+-------------------------
+
+.. currentmodule:: flask
+
+Before registering a blueprint, you can run an explicit preflight check
+with :meth:`Flask.preflight_blueprint`. It takes the same arguments as
+:meth:`Flask.register_blueprint` and returns a
+:class:`~flask.blueprints.BlueprintRegistrationPlan` describing the
+registration names, endpoints, URL rules, and CLI command names that
+would be introduced, along with any conflicts against the current app.
+Nested blueprints are planned recursively using the same dotted name
+prefix rules as real registration, so mounting the same blueprint
+multiple times under different ``name=`` values is allowed.
+
+The check is purely static: the app is not modified, and no deferred
+functions (:meth:`Blueprint.record` callbacks) are called. Deferred
+functions that cannot be interpreted statically are listed in the
+plan's ``unknown_deferred``. Normal ``register_blueprint`` behavior is
+unchanged.
+
+.. code-block:: python
+
+    plan = app.preflight_blueprint(admin, name="admin", url_prefix="/admin")
+
+    if plan.ok:
+        app.register_blueprint(admin, name="admin", url_prefix="/admin")
+    else:
+        for conflict in plan.all_conflicts:
+            print(conflict)
+
+    # inspect what would be introduced
+    print(plan.endpoints)      # ['admin.index', ...]
+    print(plan.url_rules)      # ['/admin/', ...]
+    print(plan.cli_names)      # ['admin', ...]
+    print(plan.unknown_deferred)  # opaque record() callbacks, if any
+    for child in plan.children:   # nested blueprint plans
+        print(child.name, child.ok)
+
+The tests for this feature can be run locally with:
+
+.. code-block:: text
+
+    $ python -m pytest tests/test_blueprint_preflight.py -q
+
+.. versionadded:: 3.2

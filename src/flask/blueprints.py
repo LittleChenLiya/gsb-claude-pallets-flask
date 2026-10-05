@@ -8,6 +8,9 @@ from .cli import AppGroup
 from .globals import current_app
 from .helpers import send_from_directory
 from .sansio.blueprints import Blueprint as SansioBlueprint
+from .sansio.blueprints import (  # noqa
+    BlueprintRegistrationPlan as BlueprintRegistrationPlan,
+)
 from .sansio.blueprints import BlueprintSetupState as BlueprintSetupState  # noqa
 from .sansio.scaffold import _sentinel
 

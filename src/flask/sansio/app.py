@@ -39,6 +39,7 @@ if t.TYPE_CHECKING:  # pragma: no cover
     from ..testing import FlaskClient
     from ..testing import FlaskCliRunner
     from .blueprints import Blueprint
+    from .blueprints import BlueprintRegistrationPlan
 
 T_shell_context_processor = t.TypeVar(
     "T_shell_context_processor", bound=ft.ShellContextProcessorCallable
@@ -593,6 +594,31 @@ class App(Scaffold):
         .. versionadded:: 0.7
         """
         blueprint.register(self, options)
+
+    def preflight_blueprint(
+        self, blueprint: Blueprint, **options: t.Any
+    ) -> BlueprintRegistrationPlan:
+        """Check what :meth:`register_blueprint` would do, without doing it.
+
+        Returns a :class:`~flask.sansio.blueprints.BlueprintRegistrationPlan`
+        listing the registration names, endpoints, URL rules, and CLI
+        command names the blueprint (and its nested blueprints) would
+        introduce, along with any conflicts against the current app or
+        within the plan itself.
+
+        The check is purely static: the app is not modified, and no
+        deferred functions (:meth:`Blueprint.record` callbacks) are
+        called. Deferred functions that cannot be interpreted statically
+        are listed in the plan's ``unknown_deferred``. Normal
+        :meth:`register_blueprint` behavior is unchanged.
+
+        :param blueprint: The blueprint to check.
+        :param options: The same keyword arguments that would be passed
+            to :meth:`register_blueprint`.
+
+        .. versionadded:: 3.2
+        """
+        return blueprint._make_registration_plan(self, options)
 
     def iter_blueprints(self) -> t.ValuesView[Blueprint]:
         """Iterates over all blueprints by the order they were registered.

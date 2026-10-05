@@ -23,6 +23,9 @@ Blueprint Objects
    :members:
    :inherited-members:
 
+.. autoclass:: flask.blueprints.BlueprintRegistrationPlan
+   :members:
+
 Incoming Request Data
 ---------------------
 

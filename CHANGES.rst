@@ -3,6 +3,11 @@ Version 3.2.0
 
 Unreleased
 
+-   Add ``Flask.preflight_blueprint``, an explicit preflight check that
+    returns a ``BlueprintRegistrationPlan`` listing the registration
+    names, endpoints, URL rules, and CLI command names a blueprint would
+    introduce, along with any conflicts, without modifying the app or
+    calling deferred functions.
 -   Drop support for Python 3.9. :pr:`5730`
 -   Remove previously deprecated code: ``__version__``. :pr:`5648`
 -   ``RequestContext`` has merged with ``AppContext``. ``RequestContext`` is now

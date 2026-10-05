@@ -31,6 +31,107 @@ T_url_value_preprocessor = t.TypeVar(
 )
 
 
+class _DeferredUrlRule:
+    """A deferred setup function recorded by :meth:`Blueprint.add_url_rule`.
+
+    Unlike an opaque ``record`` callback, this keeps the arguments as
+    data so that :meth:`Flask.preflight_blueprint` can statically
+    inspect the rule without calling any user code.
+    """
+
+    def __init__(
+        self,
+        rule: str,
+        endpoint: str | None,
+        view_func: ft.RouteCallable | None,
+        options: dict[str, t.Any],
+    ) -> None:
+        self.rule = rule
+        self.endpoint = endpoint
+        self.view_func = view_func
+        self.options = options
+
+    def __call__(self, state: BlueprintSetupState) -> None:
+        state.add_url_rule(self.rule, self.endpoint, self.view_func, **self.options)
+
+
+class BlueprintRegistrationPlan:
+    """The result of :meth:`Flask.preflight_blueprint`.
+
+    Describes what registering a blueprint *would* do, without doing
+    it. Instances form a tree mirroring nested blueprints; use
+    :meth:`flatten` to iterate over every node.
+
+    .. versionadded:: 3.2
+    """
+
+    def __init__(self, name: str, blueprint: Blueprint) -> None:
+        #: The dotted name the blueprint would be registered under.
+        self.name = name
+
+        #: The blueprint this plan node describes.
+        self.blueprint = blueprint
+
+        #: Full endpoint names this node would add, in order.
+        self.endpoints: list[str] = []
+
+        #: Full URL rules (prefix applied) this node would add, in order.
+        self.url_rules: list[str] = []
+
+        #: CLI command or group names this node would add, in order.
+        self.cli_names: list[str] = []
+
+        #: Descriptions of deferred functions that cannot be interpreted
+        #: statically. They are not called during preflight, so their
+        #: effect on the app is unknown.
+        self.unknown_deferred: list[str] = []
+
+        #: Conflicts detected for this node.
+        self.conflicts: list[str] = []
+
+        #: Plans for blueprints nested in this one.
+        self.children: list[BlueprintRegistrationPlan] = []
+
+    def flatten(self) -> t.Iterator[BlueprintRegistrationPlan]:
+        """Yield this node and every nested child plan, depth first."""
+        yield self
+        for child in self.children:
+            yield from child.flatten()
+
+    @property
+    def all_conflicts(self) -> list[str]:
+        """Conflicts from this node and all nested children."""
+        return [c for node in self.flatten() for c in node.conflicts]
+
+    @property
+    def ok(self) -> bool:
+        """``True`` if no conflicts were detected anywhere in the plan."""
+        return not self.all_conflicts
+
+    def __repr__(self) -> str:
+        status = "ok" if self.ok else f"{len(self.all_conflicts)} conflict(s)"
+        return f"<BlueprintRegistrationPlan {self.name!r} {status}>"
+
+
+class _PlanContext:
+    """Mutable state shared by all nodes of one preflight run."""
+
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.names: set[str] = set()
+        self.endpoints: dict[str, ft.RouteCallable | None] = {}
+        self.rules: set[tuple[str, str | None]] = set()
+        self.cli_names: set[str] = set()
+        url_map = getattr(app, "url_map", None)
+        self.app_rules: set[tuple[str, str | None]] = (
+            {(r.rule, r.subdomain or None) for r in url_map.iter_rules()}
+            if url_map is not None
+            else set()
+        )
+        app_cli = getattr(app, "cli", None)
+        self.app_cli_names: set[str] = set(getattr(app_cli, "commands", ()) or ())
+
+
 class BlueprintSetupState:
     """Temporary holder object for registering a blueprint with the
     application.  An instance of this class is created by the
@@ -376,6 +477,167 @@ class Blueprint(Scaffold):
             bp_options["name_prefix"] = name
             blueprint.register(app, bp_options)
 
+    def _make_registration_plan(
+        self, app: App, options: dict[str, t.Any], ctx: _PlanContext | None = None
+    ) -> BlueprintRegistrationPlan:
+        """Build a :class:`BlueprintRegistrationPlan` describing what
+        :meth:`register` would do, without modifying ``app`` or calling
+        any deferred functions.
+
+        This mirrors the name, URL prefix, subdomain, and CLI resolution
+        logic of :meth:`register` exactly. Deferred functions recorded
+        with :meth:`record` that cannot be interpreted statically are
+        listed in the plan's ``unknown_deferred`` instead of being called.
+
+        .. versionadded:: 3.2
+        """
+        if ctx is None:
+            ctx = _PlanContext(app)
+
+        name_prefix = options.get("name_prefix", "")
+        self_name = options.get("name", self.name)
+        name = f"{name_prefix}.{self_name}".lstrip(".")
+        plan = BlueprintRegistrationPlan(name, self)
+
+        if name in app.blueprints:
+            bp_desc = "this" if app.blueprints[name] is self else "a different"
+            plan.conflicts.append(
+                f"The name '{self_name}' is already registered for"
+                f" {bp_desc} blueprint. Use 'name=' to provide a unique name."
+            )
+        elif name in ctx.names:
+            plan.conflicts.append(
+                f"The name '{name}' is introduced more than once by this registration."
+            )
+
+        ctx.names.add(name)
+
+        subdomain = options.get("subdomain")
+        if subdomain is None:
+            subdomain = self.subdomain
+
+        url_prefix = options.get("url_prefix")
+        if url_prefix is None:
+            url_prefix = self.url_prefix
+
+        def add_rule(
+            rule: str, endpoint: str | None, view_func: ft.RouteCallable | None
+        ) -> None:
+            if url_prefix is not None:
+                if rule:
+                    rule = "/".join((url_prefix.rstrip("/"), rule.lstrip("/")))
+                else:
+                    rule = url_prefix
+            if endpoint is None:
+                endpoint = _endpoint_from_view_func(view_func)  # type: ignore
+            full_endpoint = f"{name_prefix}.{self_name}.{endpoint}".lstrip(".")
+            plan.endpoints.append(full_endpoint)
+            plan.url_rules.append(rule)
+
+            old_func = app.view_functions.get(full_endpoint)
+            if view_func is not None and old_func is not None and old_func != view_func:
+                plan.conflicts.append(
+                    f"View function mapping would overwrite the existing"
+                    f" endpoint function: {full_endpoint}"
+                )
+            planned_func = ctx.endpoints.get(full_endpoint)
+            if (
+                view_func is not None
+                and planned_func is not None
+                and planned_func != view_func
+            ):
+                plan.conflicts.append(
+                    f"The endpoint '{full_endpoint}' is introduced more than"
+                    " once by this registration."
+                )
+            ctx.endpoints.setdefault(full_endpoint, view_func)
+
+            rule_key = (rule, subdomain)
+            if rule_key in ctx.app_rules:
+                plan.conflicts.append(
+                    f"The URL rule '{rule}' already exists on the app."
+                )
+            elif rule_key in ctx.rules:
+                plan.conflicts.append(
+                    f"The URL rule '{rule}' is introduced more than once by"
+                    " this registration."
+                )
+            ctx.rules.add(rule_key)
+
+        if self.has_static_folder:
+            add_rule(
+                f"{self.static_url_path}/<path:filename>",
+                "static",
+                getattr(self, "send_static_file", None),
+            )
+
+        for deferred in self.deferred_functions:
+            if isinstance(deferred, _DeferredUrlRule):
+                add_rule(deferred.rule, deferred.endpoint, deferred.view_func)
+            else:
+                plan.unknown_deferred.append(
+                    getattr(deferred, "__qualname__", None) or repr(deferred)
+                )
+
+        cli = getattr(self, "cli", None)
+        cli_commands = getattr(cli, "commands", None) or {}
+        cli_resolved_group = options.get("cli_group", self.cli_group)
+
+        if cli_commands:
+            if cli_resolved_group is None:
+                cli_names = list(cli_commands)
+            elif cli_resolved_group is _sentinel:
+                cli_names = [name]
+            else:
+                cli_names = [cli_resolved_group]
+
+            for cli_name in cli_names:
+                plan.cli_names.append(cli_name)
+                if cli_name in ctx.app_cli_names:
+                    plan.conflicts.append(
+                        f"The CLI command '{cli_name}' already exists on the app."
+                    )
+                elif cli_name in ctx.cli_names:
+                    plan.conflicts.append(
+                        f"The CLI command '{cli_name}' is introduced more than"
+                        " once by this registration."
+                    )
+                ctx.cli_names.add(cli_name)
+
+        for blueprint, bp_options in self._blueprints:
+            bp_options = bp_options.copy()
+            bp_url_prefix = bp_options.get("url_prefix")
+            bp_subdomain = bp_options.get("subdomain")
+
+            if bp_subdomain is None:
+                bp_subdomain = blueprint.subdomain
+
+            if subdomain is not None and bp_subdomain is not None:
+                bp_options["subdomain"] = bp_subdomain + "." + subdomain
+            elif bp_subdomain is not None:
+                bp_options["subdomain"] = bp_subdomain
+            elif subdomain is not None:
+                bp_options["subdomain"] = subdomain
+
+            if bp_url_prefix is None:
+                bp_url_prefix = blueprint.url_prefix
+
+            if url_prefix is not None and bp_url_prefix is not None:
+                bp_options["url_prefix"] = (
+                    url_prefix.rstrip("/") + "/" + bp_url_prefix.lstrip("/")
+                )
+            elif bp_url_prefix is not None:
+                bp_options["url_prefix"] = bp_url_prefix
+            elif url_prefix is not None:
+                bp_options["url_prefix"] = url_prefix
+
+            bp_options["name_prefix"] = name
+            plan.children.append(
+                blueprint._make_registration_plan(app, bp_options, ctx)
+            )
+
+        return plan
+
     def _merge_blueprint_funcs(self, app: App, name: str) -> None:
         def extend(
             bp_dict: dict[ft.AppOrBlueprintKey, list[t.Any]],
@@ -431,12 +693,11 @@ class Blueprint(Scaffold):
             raise ValueError("'view_func' name may not contain a dot '.' character.")
 
         self.record(
-            lambda s: s.add_url_rule(
+            _DeferredUrlRule(
                 rule,
                 endpoint,
                 view_func,
-                provide_automatic_options=provide_automatic_options,
-                **options,
+                {"provide_automatic_options": provide_automatic_options, **options},
             )
         )
 
