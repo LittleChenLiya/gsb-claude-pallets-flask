@@ -9,6 +9,7 @@ if t.TYPE_CHECKING:  # pragma: no cover
     from .app import Flask
     from .ctx import _AppCtxGlobals
     from .ctx import AppContext
+    from .negotiation import NegotiationRecorder
     from .sessions import SessionMixin
     from .wrappers import Request
 
@@ -26,6 +27,10 @@ if t.TYPE_CHECKING:  # pragma: no cover
     class _AppCtxGlobalsProxy(ProxyMixin[_AppCtxGlobals], _AppCtxGlobals): ...
 
     class RequestProxy(ProxyMixin[Request], Request): ...
+
+    class NegotiationRecorderProxy(
+        ProxyMixin[NegotiationRecorder], NegotiationRecorder
+    ): ...
 
     class SessionMixinProxy(ProxyMixin[SessionMixin], SessionMixin): ...
 
@@ -56,6 +61,9 @@ documentation on request context for more information.\
 """
 request: RequestProxy = LocalProxy(  # type: ignore[assignment]
     _cv_app, "request", unbound_message=_no_req_msg
+)
+negotiation: NegotiationRecorderProxy = LocalProxy(  # type: ignore[assignment]
+    _cv_app, "negotiation", unbound_message=_no_req_msg
 )
 session: SessionMixinProxy = LocalProxy(  # type: ignore[assignment]
     _cv_app, "session", unbound_message=_no_req_msg

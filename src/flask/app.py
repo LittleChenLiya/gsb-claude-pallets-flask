@@ -1418,6 +1418,13 @@ class Flask(App):
         if not self.session_interface.is_null_session(ctx._get_session()):
             self.session_interface.save_session(self, ctx._get_session(), response)
 
+        # Merge any request header names recorded through the negotiation
+        # recorder into the response's Vary header. This runs for every
+        # response, including 304 and HEAD responses, so they carry the same
+        # cache identity as the corresponding 200 response. Responses that
+        # did not use the recorder are left unchanged.
+        ctx.negotiation.apply(response)
+
         return response
 
     def do_teardown_request(

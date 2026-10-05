@@ -30,6 +30,15 @@ Unreleased
     of only lower case file extensions. :pr:`6012`
 -   Fix parsing IPv6 with port in ``run`` and the test client. :pr:`6096`
 -   Add ``app.query`` route decorator for the HTTP QUERY method.
+-   Add a per-request negotiation recorder, available as
+    ``flask.negotiation``. Views and ``after_request`` callbacks (including
+    those of nested blueprints) call ``negotiation.record()`` with the name
+    of each request header used to select the response content. The recorded
+    names are merged into the response's ``Vary`` header when it is
+    finalized, with case-insensitive de-duplication, ``*`` taking priority,
+    and existing ``Vary`` order preserved. ``304`` and ``HEAD`` responses
+    carry the same ``Vary`` as the corresponding ``200`` response, and
+    responses that do not use the recorder are unchanged.
 
 
 Version 3.1.3

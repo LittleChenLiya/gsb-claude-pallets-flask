@@ -50,6 +50,35 @@ Response Objects
     :inherited-members:
     :exclude-members: json_module
 
+Content Negotiation
+-------------------
+
+.. data:: negotiation
+
+    A proxy to the negotiation recorder for the current response, an
+    instance of :class:`.NegotiationRecorder`.
+
+    Call :meth:`~.NegotiationRecorder.record` with the name of each request
+    header that was used to select the response content, for example
+    ``negotiation.record("Accept")``. When the response is finalized, the
+    recorded names are merged into its ``Vary`` header. This defines the
+    cache identity of the response: shared caches use ``Vary`` to decide
+    which stored response matches a future request, and ``304`` and ``HEAD``
+    responses carry the same ``Vary`` as the corresponding ``200`` response.
+
+    Only header names are recorded, never header values. Responses that do
+    not use the recorder are left unchanged.
+
+    This is only available when a :doc:`request context </appcontext>` is
+    active.
+
+    This is a proxy. See :ref:`context-visibility` for more information.
+
+    .. versionadded:: 3.2
+
+.. autoclass:: flask.NegotiationRecorder
+    :members:
+
 Sessions
 --------
 

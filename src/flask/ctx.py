@@ -11,6 +11,7 @@ from werkzeug.routing import MapAdapter
 from . import typing as ft
 from .globals import _cv_app
 from .helpers import _CollectErrors
+from .negotiation import NegotiationRecorder
 from .signals import appcontext_popped
 from .signals import appcontext_pushed
 
@@ -311,6 +312,12 @@ class AppContext:
 
         self.g: _AppCtxGlobals = app.app_ctx_globals_class()
         """The global data for this context. Accessed through :data:`.g`."""
+
+        self.negotiation: NegotiationRecorder = NegotiationRecorder()
+        """The negotiation recorder for the current response. Accessed
+        through :data:`.negotiation`. Shared by the view and all
+        ``after_request`` callbacks, including those of nested blueprints.
+        """
 
         self.url_adapter: MapAdapter | None = None
         """The URL adapter bound to the request, or the app if not in a request.
